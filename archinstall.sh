@@ -22,7 +22,7 @@ echo -e "${INFO}Enter username:${RESET}"
 read USERNAME
 echo -e "${INFO}Enter root password (will be visible):${RESET}"
 read ROOT_PASS
-echo -e "${INFO}Enter additional packages (comma-separated, e.g., firefox, alacritty):${RESET}"
+echo -e "${INFO}Enter additional packages (comma-separated, e.g., firefox, kitty):${RESET}"
 read EXTRA_PKGS
 EXTRA_PKGS=$(echo "$EXTRA_PKGS" | sed 's/,/ /g')
 
@@ -48,7 +48,7 @@ DM=$(printf "ly\nlxdm\ngdm\nlightdm\nsddm\n" | fzf --prompt="Select display mana
 
 # --- Base system ---
 echo -e "${ROOT}[ROOT] Installing base system...${RESET}"
-pacstrap -K /mnt base base-devel linux-firmware networkmanager efibootmgr fzf git sudo "$DM"
+pacstrap -K /mnt base base-devel linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager efibootmgr fzf git sudo "$DM"
 
 # --- Generate fstab ---
 echo -e "${INFO}[INFO] Generating fstab...${RESET}"
@@ -127,7 +127,7 @@ SELECTED=$(echo -e "$DEWM_LIST" | sed 's/\x1B\[[0-9;]*[JKmsu]//g' | fzf --multi)
 
 if [ -n "$SELECTED" ]; then
     arch-chroot /mnt /bin/bash <<EOF
-su - "$USERNAME" -c "yay --noconfirm -S $SELECTED"
+    yay --noconfirm -S $SELECTED
 EOF
 fi
 
