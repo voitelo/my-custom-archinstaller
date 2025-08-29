@@ -48,7 +48,7 @@ DM=$(printf "ly\nlxdm\ngdm\nlightdm\nsddm\n" | fzf --prompt="Select display mana
 
 # --- Base system ---
 echo -e "${ROOT}[ROOT] Installing base system...${RESET}"
-pacstrap -K /mnt base base-devel linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager efibootmgr fzf git sudo "$DM"
+pacstrap -K /mnt base base-devel linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager mesa efibootmgr fzf git sudo "$DM"
 
 # --- Generate fstab ---
 echo -e "${INFO}[INFO] Generating fstab...${RESET}"
