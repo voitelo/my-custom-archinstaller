@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 
-sudo pacman -Sy fzf
+sudo pacman -Sy --noconfirm fzf
 
-set -e
+set -euo pipefail
 
 # Colors
 RESET="\033[0m"
-INFO="\033[1;34m"    # Blue
-ROOT="\033[1;31m"    # Red
-OK="\033[1;32m"      # Green
-WARN="\033[1;33m"    # Yellow
-WM="\033[1;35m"      # Magenta for WM
-DE="\033[1;36m"      # Cyan for DE
+INFO="\033[1;34m"
+ROOT="\033[1;31m"
+OK="\033[1;32m"
+WARN="\033[1;33m"
+WM="\033[1;35m"
+DE="\033[1;36m"
 
 echo -e "${INFO}[INFO] Starting Arch installation script...${RESET}"
 
@@ -21,32 +21,53 @@ cat <<EOF
 < WELCOME TO MY ARCHINSTALL SCRIPT BRO! >
  ---------------------------------------
 \                             .       .
- \                           / `.   .' " 
+ \                           / \`.   .' " 
   \                  .---.  <    > <    >  .---.
    \                 |    \  \ - ~ ~ - /  /    |
          _____          ..-~             ~-..-~
-        |     |   \~~~\.'                    `./~~~/
+        |     |   \~~~\.'                    \./~~~/
        ---------   \__/                        \__/
       .'  O    \     /               /       \  " 
-     (_____,    `._.'               |         }  \/~~~/
-      `----.          /       }     |        /    \__/
-            `-.      |       /      |       /      `. ,~~|
-                ~-.__|      /_ - ~ ^|      /- _      `..-'   
-                     |     /        |     /     ~-.     `-. _  _  _
+     (_____,    \`._.'               |         }  \/~~~/
+      \`----.          /       }     |        /    \__/
+            \`-.      |       /      |       /      \`. ,~~|
+                ~-.__|      /_ - ~ ^|      /- _      \`..-'   
+                     |     /        |     /     ~-.     \`-. _  _  _
                      |_____|        |_____|         ~ - . _ _ _ _ _>
 
 EOF
- 
-# --- Ask user input ---
+
+# --- User input ---
 echo -e "${INFO}Enter hostname:${RESET}"
 read HOSTNAME
 echo -e "${INFO}Enter username:${RESET}"
 read USERNAME
 echo -e "${INFO}Enter root password (will be visible):${RESET}"
 read ROOT_PASS
-echo -e "${INFO}Enter additional packages (comma-separated, e.g., firefox, kitty):${RESET}"
+echo -e "${INFO}Enter user password (will be visible):${RESET}"
+read USER_PASS
+echo -e "${INFO}Enter additional packages (comma-separated, optional):${RESET}"
 read EXTRA_PKGS
 EXTRA_PKGS=$(echo "$EXTRA_PKGS" | sed 's/,/ /g')
+
+# --- Filesystem selection ---
+FS=$(printf "ext4\nbtrfs\nzfs\n" | fzf --prompt="Select filesystem: ")
+
+case "$FS" in
+  ext4)
+    ROOT_FORMAT="mkfs.ext4"
+    ;;
+  btrfs)
+    ROOT_FORMAT="mkfs.btrfs -f"
+    ;;
+  zfs)
+    ROOT_FORMAT=""  # handled in chroot
+    ;;
+  *)
+    echo -e "${ROOT}Invalid filesystem selected.${RESET}"
+    exit 1
+    ;;
+esac
 
 # --- Partitioning ---
 echo -e "${INFO}[INFO] Starting partitioning...${RESET}"
@@ -57,99 +78,133 @@ ROOT_PART=$(lsblk -lpno NAME | fzf --prompt="Select root partition: ")
 
 echo -e "${WARN}Formatting boot partition...${RESET}"
 mkfs.fat -F32 "$BOOT_PART"
-echo -e "${WARN}Formatting root partition...${RESET}"
-mkfs.ext4 "$ROOT_PART"
+
+if [[ "$FS" != "zfs" ]]; then
+    echo -e "${WARN}Formatting root partition as $FS...${RESET}"
+    $ROOT_FORMAT "$ROOT_PART"
+fi
 
 echo -e "${INFO}Mounting partitions...${RESET}"
-mount "$ROOT_PART" /mnt
 mkdir -p /mnt/boot
-mount "$BOOT_PART" /mnt/boot
+if [[ "$FS" != "zfs" ]]; then
+    mount "$ROOT_PART" /mnt
+    mount "$BOOT_PART" /mnt/boot
+fi
+
+# --- Optional ZRAM ---
+echo -e "${INFO}Do you want to enable ZRAM? (y/N):${RESET}"
+read -r ZRAM_ANSWER
+ENABLE_ZRAM=false
+if [[ "$ZRAM_ANSWER" =~ ^[Yy]$ ]]; then
+    ENABLE_ZRAM=true
+fi
+
+# --- Kernel selection ---
+KERNEL=$(printf "linux\nlinux-lts\nlinux-zen\nlinux-hardened\n" | fzf --prompt="Select kernel to install: ")
+
+# --- Bootloader selection ---
+BOOTLOADER=$(printf "GRUB\nsystemd-boot\nrEFInd\nefistub\n" | fzf --prompt="Select bootloader: ")
 
 # --- Display Manager choice ---
 DM=$(printf "ly\nlxdm\ngdm\nlightdm\nsddm\n" | fzf --prompt="Select display manager: ")
 
-# --- Base system ---
+# --- Base system installation ---
 echo -e "${ROOT}[ROOT] Installing base system...${RESET}"
-pacstrap -K /mnt base base-devel linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager mesa efibootmgr fzf git sudo "$DM"
+
+BASE_PKGS="base base-devel $KERNEL linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager $DM grub efibootmgr fzf git sudo"
+
+[[ "$FS" = "zfs" ]] && BASE_PKGS="$BASE_PKGS zfs-dkms zfs-utils"
+$ENABLE_ZRAM && BASE_PKGS="$BASE_PKGS systemd-zram-generator"
+
+pacstrap -K /mnt $BASE_PKGS
 
 # --- Generate fstab ---
 echo -e "${INFO}[INFO] Generating fstab...${RESET}"
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# --- Chroot and configure system ---
-arch-chroot /mnt /bin/bash <<EOF
-echo -e "${INFO}[INFO] Inside chroot... Starting configuration${RESET}"
+# --- Chroot configuration ---
+arch-chroot /mnt bash <<EOF
+set -e
 
-echo -e "${WARN}Setting hostname...${RESET}"
+# Hostname, locale, keyboard
 echo "$HOSTNAME" > /etc/hostname
-
-echo -e "${WARN}Configuring locale...${RESET}"
 sed -i 's/#en_GB.UTF-8/en_GB.UTF-8/' /etc/locale.gen
 locale-gen
 echo "LANG=en_GB.UTF-8" > /etc/locale.conf
 echo "KEYMAP=de" > /etc/vconsole.conf
 
-echo -e "${WARN}Setting root password...${RESET}"
+# Root & user password
 echo "root:$ROOT_PASS" | chpasswd
-
-echo -e "${WARN}Creating user: $USERNAME...${RESET}"
 useradd -m -G wheel "$USERNAME"
-passwd -d "$USERNAME"
-
-echo -e "${WARN}Granting sudo privileges to wheel group...${RESET}"
+echo "$USERNAME:$USER_PASS" | chpasswd
 echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
-echo -e "${WARN}Enabling essential services...${RESET}"
 systemctl enable NetworkManager
 systemctl enable "$DM"
 
-echo -e "${OK}[OK] Basic chroot configuration complete.${RESET}"
+# ZFS setup
+if [[ "$FS" = "zfs" ]]; then
+    echo "[INFO] Creating ZFS pool..."
+    zpool create -f rpool "$ROOT_PART"
+    zfs create rpool/root
+    mount -t zfs rpool/root /mnt
+fi
+
+# Optional ZRAM
+if [[ "$ENABLE_ZRAM" = true ]]; then
+    echo "[INFO] Setting up ZRAM..."
+    cat > /etc/systemd/zram-generator.conf <<ZZ
+[zram0]
+zram-size = ram/2
+compression-algorithm = zstd
+max-zram-streams = 4
+swap-priority = 100
+ZZ
+    systemctl enable systemd-zram-setup@zram0.service || true
+fi
+
+# Bootloader installation
+case "$BOOTLOADER" in
+    GRUB)
+        echo "[INFO] Installing GRUB..."
+        grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Arch
+        grub-mkconfig -o /boot/grub/grub.cfg
+        ;;
+    systemd-boot)
+        bootctl install
+        echo "default $KERNEL" > /boot/loader/loader.conf
+        ;;
+    rEFInd)
+        pacman -S --noconfirm refind
+        refind-install
+        ;;
+    efistub)
+        echo "[INFO] EFI stub selected; no bootloader installed."
+        ;;
+esac
 EOF
 
-# --- Install yay as the user ---
-arch-chroot /mnt /bin/bash <<EOF
-su - "$USERNAME" -c "cd ~ && git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si --noconfirm"
+# --- Install yay & additional packages ---
+arch-chroot /mnt bash <<EOF
+su - "$USERNAME" -c "git clone https://aur.archlinux.org/yay.git ~/yay && cd ~/yay && makepkg -si --noconfirm"
 EOF
 
-# --- Kernel via yay ---
-arch-chroot /mnt /bin/bash <<EOF
-su - "$USERNAME" -c "yay --noconfirm -S linux-bazzite-bin"
-EOF
-
-# --- Install additional packages if provided ---
-if [ -n "$EXTRA_PKGS" ]; then
+if [[ -n "$EXTRA_PKGS" ]]; then
     echo -e "${INFO}[INFO] Installing additional packages: $EXTRA_PKGS${RESET}"
-    arch-chroot /mnt /bin/bash <<EOF
+    arch-chroot /mnt bash <<EOF
 su - "$USERNAME" -c "yay --noconfirm -S $EXTRA_PKGS"
 EOF
 fi
 
-# --- Wayland-focused DE/WM list ---
-DEWM_LIST="
-${DE}GNOME${RESET}
-${DE}COSMIC${RESET}
-${DE}Pantheon${RESET}
-${DE}Budgie${RESET}
-${DE}Cinnamon${RESET}
-${DE}MATE${RESET}
-${DE}Deepin${RESET}
-${WM}Hyprland${RESET}
-${WM}Sway${RESET}
-${WM}River${RESET}
-${WM}Wayfire${RESET}
-${WM}Labwc${RESET}
-${WM}Niri${RESET}
-${WM}Hikari${RESET}
-${WM}Velox${RESET}
-${WM}Dwl${RESET}
-"
+# --- DE/WM selection ---
+DEWM_LIST="GNOME COSMIC Pantheon Budgie Cinnamon MATE Deepin Hyprland Sway River Wayfire Labwc Niri Hikari Velox Dwl"
 
 echo -e "${INFO}[INFO] Select DE/WM to install...${RESET}"
-SELECTED=$(echo -e "$DEWM_LIST" | sed 's/\x1B\[[0-9;]*[JKmsu]//g' | fzf --multi)
+SELECTED=$(echo -e "$DEWM_LIST" | fzf --multi)
 
-if [ -n "$SELECTED" ]; then
-    arch-chroot /mnt /bin/bash <<EOF
-    yay --noconfirm -S $SELECTED
+if [[ -n "$SELECTED" ]]; then
+    arch-chroot /mnt bash <<EOF
+su - "$USERNAME" -c "yay --noconfirm -S $SELECTED"
 EOF
 fi
 
