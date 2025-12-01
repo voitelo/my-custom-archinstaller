@@ -15,7 +15,7 @@ DE="\033[1;36m"
 
 echo -e "${INFO}[INFO] Starting Arch installation script...${RESET}"
 
-cat <<EOF
+cat <<'EOF'
 
  _______________________________________
 < WELCOME TO MY ARCHINSTALL SCRIPT BRO! >
@@ -38,21 +38,19 @@ cat <<EOF
 EOF
 
 # --- User input ---
-echo -e "${INFO}Enter hostname:${RESET}"
-read HOSTNAME
-echo -e "${INFO}Enter username:${RESET}"
-read USERNAME
-echo -e "${INFO}Enter root password (will be visible):${RESET}"
-read ROOT_PASS
-echo -e "${INFO}Enter user password (will be visible):${RESET}"
-read USER_PASS
-echo -e "${INFO}Enter additional packages (comma-separated, optional):${RESET}"
-read EXTRA_PKGS
-EXTRA_PKGS=$(echo "$EXTRA_PKGS" | sed 's/,/ /g')
+read -rp "$(echo -e "${INFO}Enter hostname:${RESET} ")" HOSTNAME
+read -rp "$(echo -e "${INFO}Enter username:${RESET} ")" USERNAME
+read -rp "$(echo -e "${INFO}Enter root password (will be visible):${RESET} ")" ROOT_PASS
+read -rp "$(echo -e "${INFO}Enter user password (will be visible):${RESET} ")" USER_PASS
+read -rp "$(echo -e "${INFO}Enter additional packages (comma-separated, optional):${RESET} ")" EXTRA_PKGS
+
+# Replace commas with spaces, default to empty string if nothing entered
+EXTRA_PKGS="${EXTRA_PKGS//,/ }"
 
 # --- Filesystem selection ---
 FS=$(printf "ext4\nbtrfs\nzfs\n" | fzf --prompt="Select filesystem: ")
 
+ROOT_FORMAT=""
 case "$FS" in
   ext4)
     ROOT_FORMAT="mkfs.ext4"
@@ -79,7 +77,7 @@ ROOT_PART=$(lsblk -lpno NAME | fzf --prompt="Select root partition: ")
 echo -e "${WARN}Formatting boot partition...${RESET}"
 mkfs.fat -F32 "$BOOT_PART"
 
-if [[ "$FS" != "zfs" ]]; then
+if [[ "$FS" != "zfs" && -n "$ROOT_FORMAT" ]]; then
     echo -e "${WARN}Formatting root partition as $FS...${RESET}"
     $ROOT_FORMAT "$ROOT_PART"
 fi
@@ -92,10 +90,9 @@ if [[ "$FS" != "zfs" ]]; then
 fi
 
 # --- Optional ZRAM ---
-echo -e "${INFO}Do you want to enable ZRAM? (y/N):${RESET}"
-read -r ZRAM_ANSWER
+read -rp "$(echo -e "${INFO}Do you want to enable ZRAM? (y/N):${RESET} ")" ZRAM_ANSWER
 ENABLE_ZRAM=false
-if [[ "$ZRAM_ANSWER" =~ ^[Yy]$ ]]; then
+if [[ "${ZRAM_ANSWER:-}" =~ ^[Yy]$ ]]; then
     ENABLE_ZRAM=true
 fi
 
@@ -112,7 +109,6 @@ DM=$(printf "ly\nlxdm\ngdm\nlightdm\nsddm\n" | fzf --prompt="Select display mana
 echo -e "${ROOT}[ROOT] Installing base system...${RESET}"
 
 BASE_PKGS="base base-devel $KERNEL linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager $DM grub efibootmgr fzf git sudo"
-
 [[ "$FS" = "zfs" ]] && BASE_PKGS="$BASE_PKGS zfs-dkms zfs-utils"
 $ENABLE_ZRAM && BASE_PKGS="$BASE_PKGS systemd-zram-generator"
 
@@ -124,7 +120,7 @@ genfstab -U /mnt >> /mnt/etc/fstab
 
 # --- Chroot configuration ---
 arch-chroot /mnt bash <<EOF
-set -e
+set -euo pipefail
 
 # Hostname, locale, keyboard
 echo "$HOSTNAME" > /etc/hostname
@@ -189,7 +185,7 @@ arch-chroot /mnt bash <<EOF
 su - "$USERNAME" -c "git clone https://aur.archlinux.org/yay.git ~/yay && cd ~/yay && makepkg -si --noconfirm"
 EOF
 
-if [[ -n "$EXTRA_PKGS" ]]; then
+if [[ -n "${EXTRA_PKGS:-}" ]]; then
     echo -e "${INFO}[INFO] Installing additional packages: $EXTRA_PKGS${RESET}"
     arch-chroot /mnt bash <<EOF
 su - "$USERNAME" -c "yay --noconfirm -S $EXTRA_PKGS"
@@ -202,7 +198,7 @@ DEWM_LIST="GNOME COSMIC Pantheon Budgie Cinnamon MATE Deepin Hyprland Sway River
 echo -e "${INFO}[INFO] Select DE/WM to install...${RESET}"
 SELECTED=$(echo -e "$DEWM_LIST" | fzf --multi)
 
-if [[ -n "$SELECTED" ]]; then
+if [[ -n "${SELECTED:-}" ]]; then
     arch-chroot /mnt bash <<EOF
 su - "$USERNAME" -c "yay --noconfirm -S $SELECTED"
 EOF
