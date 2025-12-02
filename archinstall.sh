@@ -86,7 +86,7 @@ echo -e "${INFO}Mounting partitions...${RESET}"
 mkdir -p /mnt/boot
 if [[ "$FS" != "zfs" ]]; then
     mount "$ROOT_PART" /mnt
-    mount "$BOOT_PART" /mnt/boot
+    mount --mkdir "$BOOT_PART" /mnt/boot
 fi
 
 # --- Optional ZRAM ---
