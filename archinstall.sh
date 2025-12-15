@@ -108,7 +108,7 @@ DM=$(printf "ly\nlxdm\ngdm\nlightdm\nsddm\n" | fzf --prompt="Select display mana
 # --- Base system installation ---
 echo -e "${ROOT}[ROOT] Installing base system...${RESET}"
 
-BASE_PKGS="base base-devel $KERNEL linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager $DM grub efibootmgr fzf git sudo"
+BASE_PKGS="base base-devel $KERNEL linux-firmware pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse networkmanager kitty $DM grub efibootmgr fzf git sudo"
 [[ "$FS" = "zfs" ]] && BASE_PKGS="$BASE_PKGS zfs-dkms zfs-utils"
 $ENABLE_ZRAM && BASE_PKGS="$BASE_PKGS systemd-zram-generator"
 
